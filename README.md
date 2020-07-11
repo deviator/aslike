@@ -55,7 +55,7 @@ Or if you want cache virtual methods table lookup for improving performance.
 
     ```
     auto x = SFoo(10);
-    writeln(bar(x.as!Foo), 15, 20);
+    writeln(bar(x.as!Foo, 15, 20));
     ```
 
 ## Notes
