@@ -14,4 +14,4 @@ docs/
 *.obj
 *.lst
 
-example/app
+example/**/app

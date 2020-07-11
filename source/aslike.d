@@ -1,8 +1,10 @@
+///
 module aslike;
 
 import std.traits;
 import std.string : join;
 
+///
 struct Like(T) if (is(T == interface))
 {
     private template dlgName(alias fn) { enum dlgName = "__dlg_" ~ fn.mangleof; }
@@ -24,7 +26,8 @@ struct Like(T) if (is(T == interface))
     }
 }
 
-auto as(T, X)(auto ref X obj) if (is(T == interface))
+///
+Like!T as(T, X)(auto ref X obj) if (is(T == interface))
 {
     Like!T ret;
     
