@@ -1,4 +1,4 @@
 name "aslike"
-description "A minimal D application."
+description "Duck-typing with check interface"
 authors "deviator"
-license "proprietary"
+license "MIT"
