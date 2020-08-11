@@ -101,10 +101,15 @@ unittest
     static interface Foo2 { int func() @nogc; }
     static void test(Like!Foo2 obj) @nogc { assert(obj.func() == 42); }
 
-    static class Bar : Foo2
+    static class BarC : Foo2
     { override int func() @nogc { return 42; } }
 
-    auto bar = new Bar;
+    auto barC = new BarC;
+    (() @nogc { test(barC.as!Foo2); })();
 
-    (() @nogc { test(bar.as!Foo2); })();
+    static struct BarS
+    { int func() @nogc { return 42; } }
+
+    BarS barS;
+    (() @nogc { test(barS.as!Foo2); })();
 }
