@@ -95,3 +95,16 @@ unittest
 
     assert(useFoo((new Bar).as!Foo) == 208);
 }
+
+unittest
+{
+    static interface Foo2 { int func() @nogc; }
+    static void test(Like!Foo2 obj) @nogc { assert(obj.func() == 42); }
+
+    static class Bar : Foo2
+    { override int func() @nogc { return 42; } }
+
+    auto bar = new Bar;
+
+    (() @nogc { test(bar.as!Foo2); })();
+}
