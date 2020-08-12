@@ -39,7 +39,8 @@ instead of original `obj`.
 
 `void fillLikeDelegates(T, bool nullCheck=true, R, X)(ref R dst, auto ref X src)
     if (is(T == interface) && (is(R : LikeObj!T) || is(R == Like!T)))` --
-function for filling delegate fields, if you want manual allocate `Like` objects.
+function for filling delegate fields, if you want manual allocate `Like` objects
+(not fill `__context` field).
 
 ## Examples
 
