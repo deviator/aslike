@@ -23,7 +23,7 @@ private mixin template LikeContent(T, string exattr="")
 ///
 struct Like(T) if (is(T == interface)) { mixin LikeContent!T; }
 ///
-class LikeObj(T) : T { mixin LikeContent!(T, "final override"); }
+class LikeObj(T) : T if (is(T == interface)) { mixin LikeContent!(T, "final override"); }
 ///
 class LikeObjCtx(T, S) : LikeObj!T { S __context; }
 
