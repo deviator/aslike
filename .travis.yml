@@ -11,11 +11,9 @@ d:
 
   - dmd-2.092.1
   - dmd-2.091.1
-  - dmd-2.090.1
 
   - ldc-1.22.0
   - ldc-1.21.0
-  - ldc-1.20.1
 
 script:
   - bash example/test.sh
