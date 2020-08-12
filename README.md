@@ -3,13 +3,14 @@
 `struct Like(T) if (is(T == interface))` -- wrap structure for `T`, it have
 methods and private delegate fields matches all methods from `T`.
 
-`Like!T as(T, X)(auto ref X obj) if (is(T == interface))` -- wrapper method,
-wrap object `X obj` into `Like!T` if it possible (fill all delegate fields in
-returned `Like!T` with methods pointers from `obj`).
+`Like!T as(T, bool nullCheck=true, X)(auto ref X obj) if (is(T == interface))` --
+wrapper method, wrap object `X obj` into `Like!T` if it possible (fill all
+delegate fields in returned `Like!T` with methods pointers from `obj`). If `X` is
+class or interface and if `nullCheck` is true enforce `obj` is not `null`.
 
 It can be helpful if you want to declare function or method what must get some
 object as argument, and it object must contains all methods what you want, and
-if you don't want use OOP and/or want use structs.
+if you don't want use classic OOP and/or want use structs.
 
 You can use templates for this, but you can't override class methods at this
 case, and templace can be less readable what using interface type.
@@ -61,3 +62,6 @@ Or if you want cache virtual methods table lookup for improving performance.
 ## Notes
 
 `Like` struct have reference symantics respect to wrapped object.
+
+Be careful when wrap objects allocated on stack: when program exit from scope,
+reference to object saved in delegates will be broken.

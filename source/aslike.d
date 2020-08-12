@@ -2,45 +2,36 @@
 module aslike;
 
 import std.traits;
-import std.string : join;
+import std.string : join, format;
+import std.exception : enforce;
 
 ///
 struct Like(T) if (is(T == interface))
 {
     private template dlgName(alias fn) { enum dlgName = "__dlg_" ~ fn.mangleof; }
     private template fnAttr(alias fn)
-    {
-        enum fnAttr = [__traits(getFunctionAttributes, fn)].join(" ");
-    }
+    { enum fnAttr = [__traits(getFunctionAttributes, fn)].join(" "); }
 
     static foreach (m; [__traits(allMembers, T)])
-    {
         static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
-        {
             static foreach (fn; __traits(getOverloads, T, m))
-            {
-                mixin("private ReturnType!fn delegate(Parameters!fn) " ~ fnAttr!fn ~ " " ~ dlgName!fn ~ ";");
-                mixin("ReturnType!fn " ~ m ~ "(Parameters!fn args) " ~ fnAttr!fn ~ " { return " ~ dlgName!fn ~ "(args); }");
-            }
-        }
-    }
+                mixin(format!("private %1$s delegate(%2$s) %3$s %4$s;\n" ~
+                              "%1$s %5$s (%2$s args) %3$s { return %4$s(args); }")
+                              ("ReturnType!fn", "Parameters!fn", fnAttr!fn, dlgName!fn, m));
 }
 
 ///
-Like!T as(T, X)(auto ref X obj) if (is(T == interface))
+Like!T as(T, bool nullCheck=true, X)(auto ref X obj) if (is(T == interface))
 {
     Like!T ret;
+
+    static if (nullCheck && (is(X == interface) || is(X == class)))
+        enforce(obj !is null, "object is null");
     
     static foreach (m; [__traits(allMembers, T)])
-    {
         static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
-        {
             static foreach (fn; __traits(getOverloads, T, m))
-            {
                 mixin("ret." ~ ret.dlgName!fn ~ " = &obj."~m~";");
-            }
-        }
-    }
 
     return ret;
 }
@@ -105,11 +96,28 @@ unittest
     { override int func() @nogc { return 42; } }
 
     auto barC = new BarC;
-    (() @nogc { test(barC.as!Foo2); })();
+    (() @nogc { test(barC.as!(Foo2, false)); })();
 
     static struct BarS
     { int func() @nogc { return 42; } }
 
     BarS barS;
     (() @nogc { test(barS.as!Foo2); })();
+
+    import std : assertThrown;
+    BarC nullBarC;
+    assertThrown( nullBarC.as!Foo2 );
+}
+
+@safe
+unittest
+{
+    static interface Foo3 { int func() @safe; }
+    static void test(Like!Foo3 obj) @safe { assert(obj.func() == 42); }
+
+    static class Bar : Foo3
+    { override int func() @nogc { return 42; } }
+
+    auto bar = new Bar;
+    (() @safe { test(bar.as!Foo3); })();
 }
