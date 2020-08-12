@@ -69,10 +69,11 @@ void main()
 {
     SFoo sfoo = buildSFoo();
     IFoo ifoo = new IFooImpl;
-    auto mfoo = (new IFooImpl).as!IFoo;
+    auto mfootmp = new IFooImpl;
+    auto mfoo = mfootmp.as!IFoo;
 
     enum F = 3;
-    const N = 10_000_000;
+    const N = 1_000_000;
 
     Duration[F][] times;
 
