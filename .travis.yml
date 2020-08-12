@@ -18,8 +18,8 @@ d:
   - ldc-1.20.1
 
 script:
+  - bash example/test.sh
   - dub test --compiler=${DC} --build=unittest-cov
-  - sh example/test.sh
 
 after_success:
   - if [[ ${DC} == "dmd" ]]; then bash <(curl -s https://codecov.io/bash); fi
