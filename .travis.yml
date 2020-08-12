@@ -20,4 +20,4 @@ script:
   - dub test --compiler=${DC} --build=unittest-cov
 
 after_success:
-  - if [[ ${DC} == "dmd" ]]; then bash <(curl -s https://codecov.io/bash); fi
+  - if [[ $(cut -d'.' -f2 <<< $TRAVIS_JOB_NUMBER) == "1" ]]; then bash <(curl -s https://codecov.io/bash); fi
