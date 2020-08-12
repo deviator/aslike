@@ -15,4 +15,5 @@ docs/
 *.obj
 *.lst
 
-example/**/app
+example/**
+!example/**/*.d

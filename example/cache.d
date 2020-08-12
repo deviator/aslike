@@ -1,5 +1,5 @@
 /+ dub.sdl:
-    dependency "aslike" path="../.."
+    dependency "aslike" path=".."
  +/
 
 // ldc2 -O -I../../source/app.d && rm app.o && ./app

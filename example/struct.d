@@ -1,5 +1,5 @@
 /+ dub.sdl:
-    dependency "aslike" path="../.."
+    dependency "aslike" path=".."
  +/
 
 import std.stdio;
