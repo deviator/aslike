@@ -209,6 +209,6 @@ unittest
     assert(useConstFooObj(bar1.as!Foo.toObj) == 2013);
 
     const bar2 = Bar(1, 2);
-    assert(useConstFooObj(bar2.asObj!ConstFoo) == 1008);
+    assert(useConstFoo(bar2.as!ConstFoo) == 1008);
     assert(useConstFooObj(bar2.as!ConstFoo.toObj) == 1008);
 }
