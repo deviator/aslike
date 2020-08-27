@@ -2,22 +2,49 @@
 module aslike;
 
 import std.traits;
+import std.meta;
+import std.algorithm : canFind, filter;
 import std.string : join, format;
 import std.exception : enforce;
 
 private mixin template LikeContent(T, string exattr="")
 {
     private template dlgName(alias fn) { enum dlgName = "__dlg_" ~ fn.mangleof; }
-    private template fnAttr(alias fn)
-    { enum fnAttr = [__traits(getFunctionAttributes, fn)].join(" "); }
+
+    private static string fnAttr(alias fn, string[] forbidden=[])()
+    {
+        enum f = forbidden ~ "ref";
+        return [__traits(getFunctionAttributes, fn)].filter!(a=>!f.canFind(a)).join(" ");
+    }
+
+    private static string refPref(alias fn)()
+    {
+        return functionAttributes!fn & FunctionAttribute.ref_ ? "ref" : "";
+    }
+
+    private static string buildDelegate(alias fn)()
+    {
+        enum r = refPref!fn;
+        enum s = refPref!fn ~ " ReturnType!fn";
+        return "
+        private interface %1$s { %2$s func(Parameters!fn) %3$s; }
+        private typeof(&%1$s.init.func) %4$s;\n"
+                .format(dlgName!fn~"_rettype", s, fnAttr!(fn, ["const", "@property"]), dlgName!fn);
+    }
+    private static string buildCall(alias fn, string name)()
+    {
+        return "%1$s %2$s ReturnType!fn %3$s(Parameters!fn %6$s) %4$s { return %5$s(%6$s); }\n"
+                .format(exattr, refPref!fn, name, fnAttr!fn, dlgName!fn, dlgName!fn~"_args");
+    }
 
     static foreach (m; [__traits(allMembers, T)])
         static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
             static foreach (fn; __traits(getOverloads, T, m))
-                mixin(format!("private %1$s delegate(%2$s) %3$s %4$s;\n" ~
-                              "%6$s %1$s %5$s (%2$s args) %3$s { return %4$s(args); }")
-                              ("ReturnType!fn", "Parameters!fn", fnAttr!fn, dlgName!fn, m, exattr));
-
+            {
+                pragma(msg, "---------------------");
+                pragma(msg, buildDelegate!fn ~ buildCall!(fn, m));
+                mixin(buildDelegate!fn ~ buildCall!(fn, m));
+            }
 }
 
 ///
@@ -43,11 +70,39 @@ void fillLikeDelegates(T, bool nullCheck=true, R, X)(ref R dst, auto ref X src)
 {
     static if (nullCheck && (is(X == interface) || is(X == class)))
         enforce(src !is null, "object is null");
+
+    static string buildStr(alias fn, string m)()
+    {
+        enum dstdlg = "dst." ~ R.dlgName!fn;
+        enum srcm = "src." ~ m;
+        static if (hasFunctionAttributes!(fn, "@property") &&
+                    !isFunction!(mixin(srcm)))
+        {
+            enum retsrcm = "return " ~ srcm ~ ";";
+            enum pref = R.refPref!fn;
+            static if (arity!fn == 1)
+            {
+                enum ret = !is(ReturnType!fn == void);
+                return dstdlg ~ " = "~pref~"(v) { "~srcm~" = v; "~(ret?retsrcm:"")~" };";
+            }
+            else static if (arity!fn == 0)
+            {
+                return dstdlg ~ " = "~pref~" () " ~ R.fnAttr!(fn, ["@property"]) ~ " { "~retsrcm~" };";
+            }
+            else
+                static assert(0, "property must have 0 or 1 parameter");
+        }
+        else
+            return dstdlg ~ " = &"~srcm~";";
+    }
     
     static foreach (m; [__traits(allMembers, T)])
         static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
             static foreach (fn; __traits(getOverloads, T, m))
-                mixin("dst." ~ dst.dlgName!fn ~ " = &src."~m~";");
+            {
+                pragma(msg, buildStr!(fn, m));
+                mixin(buildStr!(fn, m));
+            }
 }
 
 ///
@@ -211,4 +266,114 @@ unittest
     const bar2 = Bar(1, 2);
     assert(useConstFoo(bar2.as!ConstFoo) == 1008);
     assert(useConstFooObj(bar2.as!ConstFoo.toObj) == 1008);
+}
+
+unittest
+{
+    static interface PFoo
+    {
+        int field() const @property;
+        void field(int v) @property;
+    }
+
+    struct SPFoo { int field; }
+
+    auto spfoo = SPFoo(12);
+
+    auto wrap = spfoo.as!PFoo;
+
+    assert (wrap.field == 12);
+    wrap.field = 42;
+    assert (wrap.field == 42);
+    assert (spfoo.field == 42);
+}
+
+unittest
+{
+    static interface PFoo
+    {
+        ref const(int) field() const @property;
+        ref int field() @property;
+        void field(int v) @property;
+    }
+
+    struct SPFoo { int field; }
+
+    auto spfoo = SPFoo(12);
+
+    auto wrap = spfoo.as!PFoo;
+
+    assert (wrap.field == 12);
+    wrap.field = 42;
+    assert (wrap.field == 42);
+    assert (spfoo.field == 42);
+}
+
+unittest
+{
+    static interface PFoo
+    {
+        int field() const @property;
+        void field(int v) @property;
+    }
+
+    struct SPFoo
+    {
+        int _field;
+        int field() const @property { return _field; }
+        void field(int v) @property { _field = v; }
+    }
+
+    auto spfoo = SPFoo(12);
+
+    auto wrap = spfoo.as!PFoo;
+
+    assert (wrap.field == 12);
+    wrap.field = 42;
+    assert (wrap.field == 42);
+    assert (spfoo.field == 42);
+}
+
+unittest
+{
+    static interface PFoo
+    {
+        int field() const @property;
+        int field(int v) @property;
+    }
+
+    struct SPFoo { int field; }
+
+    auto spfoo = SPFoo(12);
+
+    auto wrap = spfoo.as!PFoo;
+
+    assert (wrap.field == 12);
+    assert ((wrap.field = 42) == 42);
+    assert (wrap.field == 42);
+    assert (spfoo.field == 42);
+}
+
+pragma(msg, "doesn't support 'inout' attribute yet");
+version(none)
+unittest
+{
+    static interface PFoo
+    {
+        ref inout(int) field() inout @property;
+    }
+
+    struct SPFoo
+    {
+        int field;
+    }
+
+    auto spfoo = SPFoo(12);
+
+    auto wrap = spfoo.as!PFoo;
+
+    assert (wrap.field == 12);
+    wrap.field = 42;
+    assert (wrap.field == 42);
+    assert (spfoo.field == 42);
 }
