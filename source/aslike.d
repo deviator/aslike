@@ -24,13 +24,12 @@ private mixin template LikeContent(T, string exattr="")
 
     private static string buildDelegate(alias fn)()
     {
-        enum r = refPref!fn;
         enum s = refPref!fn ~ " ReturnType!fn";
-        return "
-        private interface %1$s { %2$s func(Parameters!fn) %3$s; }
-        private typeof(&%1$s.init.func) %4$s;\n"
-                .format(dlgName!fn~"_rettype", s, fnAttr!(fn, ["const", "@property"]), dlgName!fn);
+        return "private alias %1$s = %2$s delegate(Parameters!fn) %3$s;
+        private %1$s %4$s;\n"
+                .format(dlgName!fn~"_type", s, fnAttr!(fn, ["const", "@property"]), dlgName!fn);
     }
+
     private static string buildCall(alias fn, string name)()
     {
         return "%1$s %2$s ReturnType!fn %3$s(Parameters!fn %6$s) %4$s { return %5$s(%6$s); }\n"
@@ -40,11 +39,7 @@ private mixin template LikeContent(T, string exattr="")
     static foreach (m; [__traits(allMembers, T)])
         static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
             static foreach (fn; __traits(getOverloads, T, m))
-            {
-                pragma(msg, "---------------------");
-                pragma(msg, buildDelegate!fn ~ buildCall!(fn, m));
                 mixin(buildDelegate!fn ~ buildCall!(fn, m));
-            }
 }
 
 ///
@@ -58,20 +53,23 @@ class LikeObjCtx(T, S) : LikeObj!T { S __context; }
 T toObj(T)(auto ref const Like!T th) @property
 {
     auto ret = new LikeObj!T;
-    static foreach (m; [__traits(allMembers, Like!T)])
-        static if (isDelegate!(__traits(getMember, Like!T, m)))
-            mixin ("ret."~m~" = th."~m~";");
+
+    static foreach (m; [__traits(allMembers, T)])
+        static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
+            static foreach (fn; __traits(getOverloads, T, m))
+                mixin ("ret.%1$s = th.%1$s;".format(th.dlgName!fn));
+
     return ret;
 }
 
 ///
-void fillLikeDelegates(T, bool nullCheck=true, R, X)(ref R dst, auto ref X src)
+void fillLikeDelegates(T, bool nullCheck=true, R, X)(ref R dst, ref X src)
     if (is(T == interface) && (is(R : LikeObj!T) || is(R == Like!T)))
 {
     static if (nullCheck && (is(X == interface) || is(X == class)))
         enforce(src !is null, "object is null");
 
-    static string buildStr(alias fn, string m)()
+    static string buildMakeOrAssign(alias fn, string m)()
     {
         enum dstdlg = "dst." ~ R.dlgName!fn;
         enum srcm = "src." ~ m;
@@ -88,6 +86,7 @@ void fillLikeDelegates(T, bool nullCheck=true, R, X)(ref R dst, auto ref X src)
             else static if (arity!fn == 0)
             {
                 return dstdlg ~ " = "~pref~" () " ~ R.fnAttr!(fn, ["@property"]) ~ " { "~retsrcm~" };";
+                //return dstdlg ~ " = "~pref~" () { "~retsrcm~" };";
             }
             else
                 static assert(0, "property must have 0 or 1 parameter");
@@ -99,10 +98,7 @@ void fillLikeDelegates(T, bool nullCheck=true, R, X)(ref R dst, auto ref X src)
     static foreach (m; [__traits(allMembers, T)])
         static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
             static foreach (fn; __traits(getOverloads, T, m))
-            {
-                pragma(msg, buildStr!(fn, m));
-                mixin(buildStr!(fn, m));
-            }
+                mixin(buildMakeOrAssign!(fn, m));
 }
 
 ///
@@ -258,10 +254,12 @@ unittest
     auto bar1 = Bar(2, 4);
     assert(useFooObj(bar1.asObj!Foo) == 213);
     assert(k == 3);
-    assert(useFooObj(bar1.as!Foo.toObj) == 213);
+    auto b1 = bar1.as!Foo;
+    assert(useFooObj(b1.toObj) == 213);
 
     assert(useConstFooObj(bar1.asObj!Foo) == 2013);
-    assert(useConstFooObj(bar1.as!Foo.toObj) == 2013);
+    auto b2 = bar1.as!Foo;
+    assert(useConstFooObj(b2.toObj) == 2013);
 
     const bar2 = Bar(1, 2);
     assert(useConstFoo(bar2.as!ConstFoo) == 1008);
@@ -286,6 +284,10 @@ unittest
     wrap.field = 42;
     assert (wrap.field == 42);
     assert (spfoo.field == 42);
+    wrap.toObj.field = 32;
+    assert (wrap.field == 32);
+    assert (wrap.toObj.field == 32);
+    assert (spfoo.field == 32);
 }
 
 unittest
@@ -307,6 +309,10 @@ unittest
     wrap.field = 42;
     assert (wrap.field == 42);
     assert (spfoo.field == 42);
+    wrap.toObj.field = 32;
+    assert (wrap.field == 32);
+    assert (wrap.toObj.field == 32);
+    assert (spfoo.field == 32);
 }
 
 unittest
@@ -332,6 +338,10 @@ unittest
     wrap.field = 42;
     assert (wrap.field == 42);
     assert (spfoo.field == 42);
+    wrap.toObj.field = 32;
+    assert (wrap.field == 32);
+    assert (wrap.toObj.field == 32);
+    assert (spfoo.field == 32);
 }
 
 unittest
@@ -352,6 +362,11 @@ unittest
     assert ((wrap.field = 42) == 42);
     assert (wrap.field == 42);
     assert (spfoo.field == 42);
+    
+    assert ((wrap.toObj.field = 32) == 32);
+    assert (wrap.field == 32);
+    assert (wrap.toObj.field == 32);
+    assert (spfoo.field == 32);
 }
 
 pragma(msg, "doesn't support 'inout' attribute yet");
@@ -363,10 +378,7 @@ unittest
         ref inout(int) field() inout @property;
     }
 
-    struct SPFoo
-    {
-        int field;
-    }
+    struct SPFoo { int field; }
 
     auto spfoo = SPFoo(12);
 
@@ -376,4 +388,10 @@ unittest
     wrap.field = 42;
     assert (wrap.field == 42);
     assert (spfoo.field == 42);
+    wrap.toObj.field = 32;
+    assert (wrap.field == 32);
+    assert (wrap.toObj.field == 32);
+    assert (spfoo.field == 32);
 }
+/+
++/
