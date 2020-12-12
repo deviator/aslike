@@ -18,3 +18,4 @@ docs/
 example/**
 !example/**/*.d
 !example/**/test.sh
+mixins.d

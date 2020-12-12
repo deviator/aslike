@@ -2,3 +2,5 @@ name "aslike"
 description "Duck-typing with check interface"
 authors "deviator"
 license "MIT"
+
+#dflags "-mixin=mixins.d"

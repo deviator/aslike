@@ -2,77 +2,220 @@
 module aslike;
 
 import std.traits;
-import std.string : join, format;
-import std.exception : enforce;
+import std.meta;
+import std.algorithm : canFind;
 
-private mixin template LikeContent(T, string exattr="")
+private string refPref(alias fn)()
+{ return functionAttributes!fn & FunctionAttribute.ref_ ? "ref" : ""; }
+
+private string fnAttr(alias fn, string[] forbidden=[])()
+{
+    enum f = forbidden ~ "ref";
+
+    template impl(string[] s)
+    {
+        static if (s.length == 1) enum impl = f.canFind(s[0]) ? "" : s[0];
+        else enum impl = impl!(s[0..$/2]) ~ " " ~ impl!(s[$/2..$]);
+    }
+
+    return impl!([__traits(getFunctionAttributes, fn)]);
+}
+
+///
+struct Like(T) if (is(T == interface))
 {
     private template dlgName(alias fn) { enum dlgName = "__dlg_" ~ fn.mangleof; }
-    private template fnAttr(alias fn)
-    { enum fnAttr = [__traits(getFunctionAttributes, fn)].join(" "); }
 
-    static foreach (m; [__traits(allMembers, T)])
+    private static string buildDelegate(alias fn)()
+    {
+        enum a1 = dlgName!fn~"_type";
+        enum a2 = refPref!fn ~ " ReturnType!fn";
+        enum a3 = fnAttr!(fn, ["const", "@property"]);
+        enum a4 = dlgName!fn;
+        return "private alias "~a1~" = "~a2~" delegate(Parameters!fn) "~a3~";
+        private "~a1~" "~a4~";\n";
+    }
+
+    private static string buildCall(alias fn, string name)()
+    {
+        enum a2 = refPref!fn;
+        enum a3 = name;
+        enum a4 = fnAttr!fn;
+        enum a5 = dlgName!fn;
+        enum a6 = dlgName!fn~"_args";
+        return a2~" ReturnType!fn "~a3~"(Parameters!fn "~a6~") "~a4~
+                " { return "~a5~"("~a6~"); }\n";
+    }
+
+    alias IT = InterfacesTuple!T;
+    static if (IT.length)
+    {
+        static foreach (it; IT)
+        {
+            mixin("Like!it as_"~it.stringof~";");
+            // Only one alias this allowed by now
+            //mixin("alias as_"~IT[0].stringof~" this;");
+        }
+        static if (IT.length == 1)
+            mixin("alias as_"~IT[0].stringof~" this;");
+    }
+
+    static foreach (m; [__traits(derivedMembers, T)])
         static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
             static foreach (fn; __traits(getOverloads, T, m))
-                mixin(format!("private %1$s delegate(%2$s) %3$s %4$s;\n" ~
-                              "%6$s %1$s %5$s (%2$s args) %3$s { return %4$s(args); }")
-                              ("ReturnType!fn", "Parameters!fn", fnAttr!fn, dlgName!fn, m, exattr));
+                mixin(buildDelegate!fn ~ buildCall!(fn, m));
 
-}
-
-///
-struct Like(T) if (is(T == interface)) { mixin LikeContent!T; }
-///
-class LikeObj(T) : T if (is(T == interface)) { mixin LikeContent!(T, "final override"); }
-///
-class LikeObjCtx(T, S) : LikeObj!T { S __context; }
-
-///
-T toObj(T)(auto ref const Like!T th) @property
-{
-    auto ret = new LikeObj!T;
-    static foreach (m; [__traits(allMembers, Like!T)])
-        static if (isDelegate!(__traits(getMember, Like!T, m)))
-            mixin ("ret."~m~" = th."~m~";");
-    return ret;
-}
-
-///
-void fillLikeDelegates(T, bool nullCheck=true, R, X)(ref R dst, auto ref X src)
-    if (is(T == interface) && (is(R : LikeObj!T) || is(R == Like!T)))
-{
-    static if (nullCheck && (is(X == interface) || is(X == class)))
-        enforce(src !is null, "object is null");
     
-    static foreach (m; [__traits(allMembers, T)])
-        static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
-            static foreach (fn; __traits(getOverloads, T, m))
-                mixin("dst." ~ dst.dlgName!fn ~ " = &src."~m~";");
+    void fillDelegatesFrom(bool nullCheck=true, X)(ref X src)
+    {
+        alias dst = this;
+
+        static if (nullCheck && (is(X == interface) || is(X == class)))
+        {
+            version (D_BetterC) assert(src !is null, "object is null");
+            else enforce(src !is null, "object is null");
+        }
+
+        static string buildMakeOrAssign(alias fn, string m)()
+        {
+            enum dstdlg = "dst." ~ dlgName!fn;
+            enum srcm = "src." ~ m;
+            static if (hasFunctionAttributes!(fn, "@property") &&
+                        !isFunction!(mixin(srcm)))
+            {
+                enum retsrcm = "return " ~ srcm ~ ";";
+                enum pref = refPref!fn;
+                static if (arity!fn == 1)
+                {
+                    enum ret = !is(ReturnType!fn == void);
+                    return dstdlg ~ " = "~pref~"(v) { "~srcm~" = v; "~(ret?retsrcm:"")~" };";
+                }
+                else static if (arity!fn == 0)
+                    return dstdlg ~ " = "~pref~" () " ~ fnAttr!(fn, ["@property"]) ~ " { "~retsrcm~" };";
+                else
+                    static assert(0, "property must have 0 or 1 parameter");
+            }
+            else return dstdlg ~ " = &"~srcm~";";
+        }
+
+        alias IT = InterfacesTuple!T;
+        static if (IT.length)
+            static foreach (it; IT)
+                mixin("this.as_"~it.stringof~".fillDelegatesFrom!nullCheck(src);");
+        
+        static foreach (m; [__traits(derivedMembers, T)])
+            static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
+                static foreach (fn; __traits(getOverloads, T, m))
+                    mixin(buildMakeOrAssign!(fn, m));
+    }
 }
 
 ///
-Like!T as(T, bool nullCheck=true, X)(ref X obj) if (is(T == interface))
+Like!T as(T, bool nullCheck=true, X)(ref X obj)
+    if (is(T == interface))
 {
     Like!T ret;
-    fillLikeDelegates!(T,nullCheck)(ret, obj);
+    ret.fillDelegatesFrom!nullCheck(obj);
     return ret;
 }
 
-///
-T asObj(T, bool nullCheck=true, X)(ref X obj) if (is(T == interface))
-{
-    auto ret = new LikeObj!T;
-    fillLikeDelegates!(T,nullCheck)(ret, obj);
-    return ret;
-}
 
-///
-T asObjCtx(T, bool nullCheck=true, X)(auto ref X obj) if (is(T == interface))
+version (D_BetterC) { }
+else
 {
-    auto ret = new LikeObjCtx!(T, X);
-    ret.__context = obj; // copy context
-    fillLikeDelegates!(T,nullCheck)(ret, ret.__context);
-    return ret;
+    import std : format, enforce;
+
+    alias LikeObj(T, S) = LikeWrapper!(T, S, true);
+
+    alias LikeObjCtx(T, S) = LikeWrapper!(T, S, false);
+
+    ///
+    class LikeWrapper(T, S, bool isRef=false, string ctxName="__context_", bool isFinal=true) : T
+        if (is(T == interface))
+    {
+        mixin((isFinal?"private":"protected")~" Unqual!S"~(isRef?"*":"")~" "~ctxName~";");
+
+        static if (isRef)
+        {
+            this(ref Unqual!S c) { mixin(ctxName ~ " = &c;"); }
+            this(ref const Unqual!S c) const { mixin(ctxName ~ " = &c;"); }
+        }
+        else
+        {
+            this(S c) pure
+            {
+                static if (__traits(compiles, S.init is null))
+                    enforce(c !is null, "context is null");
+                mixin(ctxName ~ " = c;");
+            }
+        }
+
+        private static string buildCall(alias fn, string name)()
+        {
+            enum args = fn.mangleof ~ "_args";
+            enum aref = refPref!fn;
+
+            string callOrFieldUse()
+            {
+                enum ctxfld = ctxName ~ "." ~ name;
+                static if (hasFunctionAttributes!(fn, "@property") &&
+                            !isFunction!(typeof(mixin(ctxfld))))
+                {
+                    enum retctxfld = "return " ~ ctxfld ~ ";";
+                    static if (arity!fn == 1)
+                    {
+                        enum ret = !is(ReturnType!fn == void);
+                        return ctxfld~" = "~args~"[0]; "~(ret?retctxfld:"");
+                    }
+                    else static if (arity!fn == 0) return retctxfld;
+                    else static assert(0, "property must have 0 or 1 parameter");
+                }
+                else return "return " ~ ctxfld ~ "(" ~ args ~ ");";
+            }
+
+            return "%7$s override %1$s %2$s ReturnType!fn %3$s(Parameters!fn %4$s) %5$s { %6$s }\n"
+                    .format("", aref, name, args, fnAttr!fn, callOrFieldUse(), isFinal ? "final" : "");
+        }
+
+        static foreach (m; [__traits(allMembers, T)])
+            static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
+                static foreach (fn; __traits(getOverloads, T, m))
+                    mixin(buildCall!(fn, m));
+    }
+
+    ///
+    auto toObj(X)(auto ref X th) @property
+        if (is(Unqual!X == Like!T, T))
+    {
+        static if (is(Unqual!X == Like!T, T))
+        {
+            static if (is(ConstOf!X == X))
+                return new const LikeObjCtx!(T, Like!T)(th);
+            else
+                return new LikeObjCtx!(T, Like!T)(th);
+        }
+        else static assert(0);
+    }
+
+    ///
+    auto asObj(T, bool nullCheck=true, X)(ref X obj)
+        if (is(T == interface))
+    {
+        static if (is(ConstOf!X == X))
+            return new const LikeObj!(T, X)(obj);
+        else
+            return new LikeObj!(T, X)(obj);
+    }
+
+    ///
+    auto asObjCtx(T, bool nullCheck=true, X)(auto ref X obj)
+        if (is(T == interface))
+    {
+        static if (is(ConstOf!X == X))
+            return new const LikeObjCtx!(T, X)(obj);
+        else
+            return new LikeObjCtx!(T, X)(obj);
+    }
 }
 
 version(unittest)
@@ -202,13 +345,131 @@ unittest
 
     auto bar1 = Bar(2, 4);
     assert(useFooObj(bar1.asObj!Foo) == 213);
+    assert(useFooObj(bar1.asObjCtx!Foo) == 213);
     assert(k == 3);
-    assert(useFooObj(bar1.as!Foo.toObj) == 213);
+    auto b1 = bar1.as!Foo;
+    assert(useFooObj(b1.toObj) == 213);
 
     assert(useConstFooObj(bar1.asObj!Foo) == 2013);
-    assert(useConstFooObj(bar1.as!Foo.toObj) == 2013);
+    assert(useConstFooObj(bar1.asObjCtx!Foo) == 2013);
+    auto b2 = bar1.as!Foo;
+    assert(useConstFooObj(b2.toObj) == 2013);
 
     const bar2 = Bar(1, 2);
     assert(useConstFoo(bar2.as!ConstFoo) == 1008);
-    assert(useConstFooObj(bar2.as!ConstFoo.toObj) == 1008);
+    auto bb2 = bar2.as!ConstFoo;
+    assert(useConstFooObj(bb2.toObj) == 1008);
+}
+
+version (unittest)
+{
+    void testField(I, S)()
+    {
+        auto s = S(12);
+        auto w = s.as!I;
+
+        enum setreturn = is(typeof(I.init.field = 12) == int);
+
+        assert (w.field == 12);
+        assert ((cast(const)w).field == 12);
+        static if (setreturn) assert ((w.field = 42) == 42);
+        else w.field = 42;
+        assert (w.field == 42);
+        assert ((cast(const)w).field == 42);
+        assert (s.field == 42);
+
+        auto o = w.toObj;
+        assert (o.field == 42);
+        static if (setreturn) assert ((o.field = 50) == 50);
+        else o.field = 50;
+        assert (w.field == 50);
+        assert (s.field == 50);
+        assert (o.field == 50);
+
+        auto c = s.asObjCtx!I;
+        assert (c.field == 50);
+        static if (setreturn) assert ((c.field = 123) == 123);
+        else c.field = 123;
+        assert (w.field == 50);
+        assert (s.field == 50);
+        assert (o.field == 50);
+        assert (c.field == 123);
+    }
+}
+
+unittest
+{
+    static interface F1
+    {
+        @safe:
+        int field() const @property;
+        void field(int v) @property;
+    }
+
+    static interface F2
+    {
+        @safe:
+        ref const(int) field() const @property;
+        ref int field() @property;
+        void field(int v) @property;
+    }
+
+    static interface F3
+    {
+        @safe:
+        int field() const @property;
+        int field(int v) @property;
+    }
+
+    struct S1 { int field; }
+
+    static struct S2
+    {
+        int _field;
+        @safe:
+        int field() const @property { return _field; }
+        void field(int v) @property { _field = v; }
+    }
+
+    static struct S3
+    {
+        int _field;
+        @safe:
+        int field() const @property { return _field; }
+        int field(int v) @property { _field = v; return _field; }
+    }
+
+    testField!(F1, S1);
+    testField!(F2, S1);
+    testField!(F3, S1);
+
+    testField!(F1, S2);
+    //testField!(F2, S2);
+    //testField!(F3, S2);
+
+    //testField!(F1, S3);
+    //testField!(F2, S3);
+    testField!(F3, S3);
+}
+
+unittest
+{
+    static interface PFoo
+    {
+        ref inout(int) field() inout @property;
+    }
+
+    struct SPFoo { int field; }
+
+    auto spfoo = SPFoo(12);
+
+    auto wrap = spfoo.asObjCtx!PFoo;
+
+    assert (wrap.field == 12);
+    wrap.field = 42;
+    assert (wrap.field == 42);
+    assert (spfoo.field == 12);
+    wrap.field = 32;
+    assert (wrap.field == 32);
+    assert (spfoo.field == 12);
 }
