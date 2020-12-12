@@ -15,7 +15,9 @@ can wrap structs to auto-implement objects.
 ## API
 
 `struct Like(T) if (is(T == interface))` -- wrapper for `T`, it have
-methods and private delegate fields matches all methods from `T`.
+methods and private delegate fields matches all methods from `T` and method
+for filling delegates from object
+`fillDelegatesFrom(bool nullCheck=true, X)(ref X src)`.
 
 `class LikeObj(T) : T` -- wrapper for `T`, as `Like!T`, but class.
 
@@ -37,11 +39,6 @@ instead of original `obj`.
 `T toObj(T)(auto ref const Like!T th) @property` -- make new wrapper object
 (`LikeObj!T` -- without saving `th`) and fill delegates from `th` delegates.
 
-`void fillLikeDelegates(T, bool nullCheck=true, R, X)(ref R dst, auto ref X src)
-    if (is(T == interface) && (is(R : LikeObj!T) || is(R == Like!T)))` --
-function for filling delegate fields, if you want manual allocate `Like` objects
-(not fill `__context` field).
-
 ## Examples
 
 Overridable method with any compatible type: [example](example/struct.d)
@@ -51,6 +48,12 @@ methods performance: [cache example](example/cache.d)
 
 Use struct when method or function gets interface instance as argument:
 [wrap to object example](example/wrapobj.d)
+
+## BetterC
+
+With `-betterC` flag compatibles only struct `Like` and function `as`.
+`Like` objects emulates inheritance through `alias this`, but only if interface
+have exact one parent. See [example](example/bcoop.d)
 
 ## Notes
 
