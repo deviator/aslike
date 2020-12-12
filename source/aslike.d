@@ -64,6 +64,50 @@ struct Like(T) if (is(T == interface))
         static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
             static foreach (fn; __traits(getOverloads, T, m))
                 mixin(buildDelegate!fn ~ buildCall!(fn, m));
+
+    
+    void fillDelegatesFrom(bool nullCheck=true, X)(ref X src)
+    {
+        alias dst = this;
+
+        static if (nullCheck && (is(X == interface) || is(X == class)))
+        {
+            version (D_BetterC) assert(src !is null, "object is null");
+            else enforce(src !is null, "object is null");
+        }
+
+        static string buildMakeOrAssign(alias fn, string m)()
+        {
+            enum dstdlg = "dst." ~ dlgName!fn;
+            enum srcm = "src." ~ m;
+            static if (hasFunctionAttributes!(fn, "@property") &&
+                        !isFunction!(mixin(srcm)))
+            {
+                enum retsrcm = "return " ~ srcm ~ ";";
+                enum pref = refPref!fn;
+                static if (arity!fn == 1)
+                {
+                    enum ret = !is(ReturnType!fn == void);
+                    return dstdlg ~ " = "~pref~"(v) { "~srcm~" = v; "~(ret?retsrcm:"")~" };";
+                }
+                else static if (arity!fn == 0)
+                    return dstdlg ~ " = "~pref~" () " ~ fnAttr!(fn, ["@property"]) ~ " { "~retsrcm~" };";
+                else
+                    static assert(0, "property must have 0 or 1 parameter");
+            }
+            else return dstdlg ~ " = &"~srcm~";";
+        }
+
+        alias IT = InterfacesTuple!T;
+        static if (IT.length)
+            static foreach (it; IT)
+                mixin("this.as_"~it.stringof~".fillDelegatesFrom!nullCheck(src);");
+        
+        static foreach (m; [__traits(derivedMembers, T)])
+            static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
+                static foreach (fn; __traits(getOverloads, T, m))
+                    mixin(buildMakeOrAssign!(fn, m));
+    }
 }
 
 ///
@@ -71,51 +115,10 @@ Like!T as(T, bool nullCheck=true, X)(ref X obj)
     if (is(T == interface))
 {
     Like!T ret;
-    fillLikeDelegates!(T,nullCheck)(ret, obj);
+    ret.fillDelegatesFrom!nullCheck(obj);
     return ret;
 }
 
-void fillLikeDelegates(T, bool nullCheck=true, R, X)(ref R dst, ref X src)
-    if (is(T == interface) && is(R == Like!T))
-{
-    static if (nullCheck && (is(X == interface) || is(X == class)))
-    {
-        version (D_BetterC) assert(src !is null, "object is null");
-        else enforce(src !is null, "object is null");
-    }
-
-    static string buildMakeOrAssign(alias fn, string m)()
-    {
-        enum dstdlg = "dst." ~ R.dlgName!fn;
-        enum srcm = "src." ~ m;
-        static if (hasFunctionAttributes!(fn, "@property") &&
-                    !isFunction!(mixin(srcm)))
-        {
-            enum retsrcm = "return " ~ srcm ~ ";";
-            enum pref = refPref!fn;
-            static if (arity!fn == 1)
-            {
-                enum ret = !is(ReturnType!fn == void);
-                return dstdlg ~ " = "~pref~"(v) { "~srcm~" = v; "~(ret?retsrcm:"")~" };";
-            }
-            else static if (arity!fn == 0)
-                return dstdlg ~ " = "~pref~" () " ~ fnAttr!(fn, ["@property"]) ~ " { "~retsrcm~" };";
-            else
-                static assert(0, "property must have 0 or 1 parameter");
-        }
-        else return dstdlg ~ " = &"~srcm~";";
-    }
-
-    alias IT = InterfacesTuple!T;
-    static if (IT.length)
-        static foreach (it; IT)
-            mixin("fillLikeDelegates!(it, nullCheck)(dst.as_"~it.stringof~", src);");
-    
-    static foreach (m; [__traits(derivedMembers, T)])
-        static if (__traits(isVirtualFunction, __traits(getMember, T, m)))
-            static foreach (fn; __traits(getOverloads, T, m))
-                mixin(buildMakeOrAssign!(fn, m));
-}
 
 version (D_BetterC) { }
 else

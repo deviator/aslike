@@ -3,4 +3,4 @@ description "Duck-typing with check interface"
 authors "deviator"
 license "MIT"
 
-dflags "-mixin=mixins.d"
+#dflags "-mixin=mixins.d"
